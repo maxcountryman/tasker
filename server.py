@@ -10,20 +10,25 @@ import sys
 import time
 import threading
 import itertools
+import subprocess
+import shlex
 
 from heapq import heappush, heappop
 
 INVALID = 0
-APP_NAME = 'tasker'
+SECONDS = 60.0
+WAITFOR = 30.0
 
 
 class TaskServer(threading.Thread):
     
     def __init__(self):
         threading.Thread.__init__(self)
-        self.pq = [] # priority queue
+        self.pq = []    # priority queue
         self.tasks = {} # queued tasks
         self.counter = itertools.count(1)
+        self.daemon = True
+        self.start()
     
     def _notify(self, title, task):
         '''This internal method is a multi-platform notifier for tasks. It 
@@ -33,24 +38,22 @@ class TaskServer(threading.Thread):
         If none is found either one will have to be installed or the program 
         will not yet have a way of notifying on the specified platform in 
         which case the program will exit.
+        
+        :param:title: The title of the event
+        :param:task: The task itself, i.e. a string representing the task
         '''
         
         platform = os.uname()[0]
         
         if platform == 'Darwin':
-            try:
-                import Growl
-            except ImportError, e:
-                print 'You must install growl-py; pip install growl-py'
-                raise e
-            growl = Growl.GrowlNotifier(APP_NAME, ['tasks'])
-            growl.register()
-            growl.notify('tasks', title, task)
+            cmds = 'growlnotify -m ' + '"' + task + '"' + ' ' + '"' + title + '"'
+            args = shlex.split(cmds)
+            subprocess.Popen(args)
         elif platform == 'Linux':
             # Alex, use whatever nofity module is good :D
             pass
         else:
-            print 'Your platform is not currently supported'
+            print 'Your platform is currently not supported'
             sys.exit()
     
     def _get_top_priority(self):
@@ -65,11 +68,11 @@ class TaskServer(threading.Thread):
         if count is not INVALID: # hasn't been deleted
             return (_time, task)
     
-    def _monitor(self, wait=60.0):
+    def _monitor(self, wait=WAITFOR):
         '''This internal method checks for queued tasks once every n number 
         of seconds, as specified by `wait`. 
         
-        Default is 60 seconds.
+        Default is 30 seconds.
         '''
         
         while True:
@@ -77,7 +80,7 @@ class TaskServer(threading.Thread):
             while self.tasks:
                 _time, task = self._get_top_priority()
                 self._notify('New Task', task)
-                time.sleep(_time) # wait for the duration of the task
+                time.sleep(_time * SECONDS) # wait for the duration of the task
                 self._notify('Times up!', 'The time has expired for the current task')
     
     def add_task(self, task, _time, priority=0, count=None):
@@ -101,11 +104,13 @@ class TaskServer(threading.Thread):
         being executed later on, i.e. deletes it.
         '''
         
-        task = self.tasks[task]
+        task = self.tasks.get(task)
+        if not task:
+            return
         task[1] = INVALID
     
     def reprioritize(self, priority, task):
-        '''Readds a task to the `cls.tasks` dictionary, alterting the 
+        '''Re-adds a task to the `cls.tasks` dictionary, alterting the 
         priority while maintaining its position.
         
         The original task's count is set to `INVALID` thus preventing it from 
@@ -118,5 +123,4 @@ class TaskServer(threading.Thread):
     
     def run(self):
         self._monitor()
-
 
